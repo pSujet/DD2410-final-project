@@ -37,6 +37,7 @@ DETECTED = False
 CUBESTATE = True
 CUBEPLACED = False
 TRIED_PICK = False
+TRIED_PLACE = False
 
 #############################################################################################################################
 #                                                                                                                           #
@@ -70,28 +71,28 @@ class tuckarm(pt.behaviour.Behaviour):
 
         # execution checker
         self.sent_goal = False
-        self.finished = False
+        # self.finished = False
 
         # become a behaviour
         super(tuckarm, self).__init__("Tuck arm!")
 
     def update(self):
         # already tucked the arm
-        if self.finished: 
-            return pt.common.Status.SUCCESS
+        # if self.finished: 
+        #     return pt.common.Status.SUCCESS
         # command to tuck arm if haven't already
         # elif not self.sent_goal:
 
         # send the goal
-        elif not self.sent_goal:
+        if not self.sent_goal:
             self.play_motion_ac.send_goal(self.goal)
             self.sent_goal = True
             # rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
             return pt.common.Status.RUNNING
 
-        if self.play_motion_ac.get_result():
+        elif self.play_motion_ac.get_result():
             # rospy.sleep(10)
-            self.finished = True
+            self.sent_goal = False
             rospy.loginfo(Fore.GREEN + 'Tuck arm = Success')
             return pt.common.Status.SUCCESS
 
@@ -377,13 +378,14 @@ class reinitcube(pt.behaviour.Behaviour):
     def update(self):
         
         # Over here I might need to add conditions to check for the state of the cube (using the data from topic /robotics_intro/aruco_single/position)
-        global CUBESTATE, PICKED, TRIED_MOVE, TRIED_PICK
+        global CUBESTATE, PICKED, TRIED_MOVE, TRIED_PICK, TRIED_PLACE
         if TRIED_PICK:
             self.move_head_req = self.set_cube_state_srv(self.model_state)
             PICKED = False
             TRIED_MOVE =False
             GRIPPER = True
             TRIED_PICK = False
+            TRIED_PLACE = False
             CUBESTATE = True
             rospy.loginfo('does it work???????????????????????????????')
 
@@ -400,7 +402,7 @@ class checkpickcube(pt.behaviour.Behaviour):
 
     def update(self):
         
-        global PICKED, MOVEBASESTATUS
+        global PICKED, MOVEBASESTATUS, TRIED_PICK
         
         if PICKED:
             rospy.loginfo(Fore.GREEN + 'CHECK PICK CUBE = Success')
@@ -408,8 +410,8 @@ class checkpickcube(pt.behaviour.Behaviour):
             
         else:
             rospy.loginfo(Fore.GREEN + 'CHECK PICK CUBE = Fail')
-    
-            MOVEBASESTATUS = 0
+            if TRIED_PICK:
+                MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
 
 #####################################################################################################
@@ -584,14 +586,14 @@ class checkplacecube(pt.behaviour.Behaviour):
 
     def update(self):
         
-        global PLACED, TRIED_MOVE, MOVEBASESTATUS
+        global PLACED, TRIED_MOVE, MOVEBASESTATUS, TRIED_PLACE
         if PLACED:
             rospy.loginfo(Fore.GREEN + 'CHECK PLACE CUBE = Success')
             return pt.common.Status.SUCCESS
         else:
             rospy.loginfo(Fore.RED + 'CHECK PLACE CUBE = Fail')
-
-            MOVEBASESTATUS = 0
+            if TRIED_PLACE:
+                MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
 
 #####################################################################################################
@@ -621,7 +623,7 @@ class placecube(pt.behaviour.Behaviour):
     
 
     def update(self):
-        global PLACED
+        global PLACED, TRIED_PLACE
         # success if done
         # if self.done:
         #     rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Success')
@@ -634,6 +636,7 @@ class placecube(pt.behaviour.Behaviour):
             # command
             self.place_cube_req = self.place_cube_srv()
             self.tried = True
+            TRIED_PLACE = True
 
             # tell the tree you're running
             # rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
