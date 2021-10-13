@@ -30,12 +30,13 @@ HEADUP = False; HEADDOWN = False
 MOVEBASESTATUS = 0
 TRIED_MOVE = False
 
+
 # Gripper, cube detected after place action, cube reinitialization
 GRIPPER_THRESHOLD = 0.014
 DETECTED = False
 CUBESTATE = True
 CUBEPLACED = False
-GRIPPER = False
+TRIED_PICK = False
 
 #############################################################################################################################
 #                                                                                                                           #
@@ -163,7 +164,7 @@ class checklocalization(pt.behaviour.Behaviour):
             # rospy.loginfo(Fore.GREEN + 'CHECK LOCALIZATION UPDATE = Success')
             return pt.common.Status.SUCCESS
         else:
-            rospy.loginfo(Fore.GREEN + 'CHECK LOCALIZATION UPDATE = Fail')
+            # rospy.loginfo(Fore.GREEN + 'CHECK LOCALIZATION UPDATE = Fail')
             return pt.common.Status.FAILURE 
     def amcl_estimate_cb(self, msg):
         global LOCALIZED
@@ -332,12 +333,11 @@ class checkgripper(pt.behaviour.Behaviour):
         super(checkgripper, self).__init__('Check Gripper')
 
     def update(self):
-        global GRIPPER_THRESHOLD, CUBESTATE, PICKED, GRIPPER
+        global GRIPPER_THRESHOLD, CUBESTATE, PICKED
     
         if abs(self.gripper_state.actual.positions[0]) < GRIPPER_THRESHOLD and abs(self.gripper_state.actual.positions[1]) < GRIPPER_THRESHOLD :
             rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER = Fail')
             # rospy.loginfo('gripper state = {}' .format(self.gripper_state.actual.positions))
-            # GRIPPER = True
             return pt.common.Status.FAILURE
           
         else:
@@ -377,12 +377,14 @@ class reinitcube(pt.behaviour.Behaviour):
     def update(self):
         
         # Over here I might need to add conditions to check for the state of the cube (using the data from topic /robotics_intro/aruco_single/position)
-        global CUBESTATE, PICKED, GRIPPER, TRIED_MOVE
-        self.move_head_req = self.set_cube_state_srv(self.model_state)
-        if not GRIPPER:
+        global CUBESTATE, PICKED, TRIED_MOVE, TRIED_PICK
+        if TRIED_PICK:
+            self.move_head_req = self.set_cube_state_srv(self.model_state)
             PICKED = False
             TRIED_MOVE =False
             GRIPPER = True
+            TRIED_PICK = False
+            CUBESTATE = True
             rospy.loginfo('does it work???????????????????????????????')
 
         rospy.loginfo(Fore.GREEN + 'REINITCUBE = Success')
@@ -406,6 +408,7 @@ class checkpickcube(pt.behaviour.Behaviour):
             
         else:
             rospy.loginfo(Fore.GREEN + 'CHECK PICK CUBE = Fail')
+    
             MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
 
@@ -447,7 +450,7 @@ class pickcube(pt.behaviour.Behaviour):
         self.pick_cube_srv = rospy.ServiceProxy(my_pick_cube_srv_nm, SetBool)
         rospy.wait_for_service(my_pick_cube_srv_nm, timeout=30)
 
-        rospy.sleep(3)
+        # rospy.sleep(3)
 
         # execution checker
         self.tried = False
@@ -458,13 +461,14 @@ class pickcube(pt.behaviour.Behaviour):
     
 
     def update(self):
-        global PICKED
+        global PICKED, TRIED_PICK
 
         if not self.tried:
 
             # command
             self.pick_cube_req = self.pick_cube_srv()
             self.tried = True
+            TRIED_PICK = True
 
             # tell the tree you're running
             # rospy.loginfo(Fore.GREEN + 'PICK CUBE = Running')
@@ -475,6 +479,8 @@ class pickcube(pt.behaviour.Behaviour):
             self.tried = False
             PICKED = True
             rospy.loginfo(Fore.GREEN + 'PICK CUBE = Success')
+            # rospy.sleep(1)
+            rospy.loginfo(Fore.GREEN + 'Woke up!!!!!!!!!!!')
             return pt.common.Status.SUCCESS
 
         # if failed
@@ -499,8 +505,9 @@ class pickcube(pt.behaviour.Behaviour):
 #                                   detectplacedcube Class                                          #
 #####################################################################################################
 class detectplacedcube(pt.behaviour.Behaviour):
-    def __init__(self):
+    def __init__(self, task):
         rospy.loginfo('Initliazing Detect Placed Cube Behavior!')
+        self.task = task
 
         # Subscriber: /robotics_intro/aruco_single/position
         rospy.Subscriber('/robotics_intro/aruco_single/position', Vector3Stamped, self.detect_cube_cb)
@@ -508,30 +515,64 @@ class detectplacedcube(pt.behaviour.Behaviour):
         super(detectplacedcube, self).__init__('Detect placed cube')
 
     def update(self):
-        global PLACED, PICKED, DETECTED, CUBEPLACED
+        global PLACED, PICKED, DETECTED, CUBEPLACED, CUBESTATE
+        # try:
+        #     rospy.wait_for_message('/robotics_intro/aruco_single/position', Vector3Stamped, timeout=5)
+        #     DETECTED = True
+        #     if self.task == 'pick':
+        #         PICKED = False
+        #         CUBESTATE = False
+        #         return pt.common.Status.FAILURE
+        #     if self.task == 'place':
+        #         PLACED = True
+        #         return pt.common.Status.SUCCESS
+        # except:
+        #     DETECTED = False        
+        #     if self.task == 'pick':
+        #         PICKED = True
+        #         return pt.common.Status.SUCCESS
+        #     if self.task == 'place':
+        #         PLACED = False
+        #         CUBESTATE = False
+        #         return pt.common.Status.FAILURE    
         try:
-            rospy.wait_for_message('/robotics_intro/aruco_single/position', Vector3Stamped, timeout=1)
-        except:
-            DETECTED = False
-
-        if PLACED:
-            if DETECTED:
-                # CUBEPLACED = True
-                return pt.common.Status.SUCCESS
-            else:
+            rospy.wait_for_message('/robotics_intro/aruco_single/position', Vector3Stamped, timeout=5)
+            DETECTED = True
+            if self.task == 'pick':
                 PICKED = False
+                CUBESTATE = False
+            if self.task == 'place':
+                PLACED = True
+            return pt.common.Status.SUCCESS
+        except:
+            DETECTED = False        
+            if self.task == 'pick':
+                PICKED = True
+            if self.task == 'place':
                 PLACED = False
-                # CUBEPLACED = False
-                return pt.common.Status.FAILURE
+                CUBESTATE = False
+            return pt.common.Status.FAILURE
+
+        # if PLACED:
+        #     if DETECTED:
+        #         # CUBEPLACED = True
+        #         return pt.common.Status.SUCCESS
+        #     else:
+        #         PICKED = False
+        #         PLACED = False
+        #         # CUBEPLACED = False
+        #         return pt.common.Status.FAILURE
 
         return super().update()
 
     def detect_cube_cb(self, msg):
-        global PLACED, DETECTED, PICKED
-        # rospy.loginfo('DETECT_ARUCO_CB FUNCTION')
-        if PLACED == True and PICKED == True:
-            rospy.loginfo('DETECT_ARUCO_CB FUNCTION IF STATEMENT TRUE!!')
-            DETECTED = True
+        pass
+        # rospy.loginfo('CUBE DETECTED FOR TASK' + self.task)
+        # global PLACED, DETECTED, PICKED
+        # # rospy.loginfo('DETECT_ARUCO_CB FUNCTION')
+        # if PLACED == True and PICKED == True:
+        #     rospy.loginfo('DETECT_ARUCO_CB FUNCTION IF STATEMENT TRUE!!')
+        #     DETECTED = True
             
 #####################################################################################################
 #                                     checkplacecube Class                                          #
@@ -668,10 +709,10 @@ class movehead(pt.behaviour.Behaviour):
 
     def update(self):
         global HEADUP, HEADDOWN
-
+        print('moving the head {}' .format(self.direction))
         if self.direction == 'up':
             if HEADUP:
-                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
+                rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
                 return pt.common.Status.SUCCESS
             else:
                 move_head_srv_req = self.move_head_srv('up')
@@ -681,12 +722,12 @@ class movehead(pt.behaviour.Behaviour):
                     HEADDOWN = False
                     rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
                     return pt.common.Status.SUCCESS
-                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Running')
+                rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Running')
 
                 return pt.common.Status.RUNNING
         elif self.direction == 'down':
             if HEADDOWN:
-                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
+                rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
                 return pt.common.Status.SUCCESS
             else:
                 move_head_srv_req = self.move_head_srv('down')
@@ -696,7 +737,7 @@ class movehead(pt.behaviour.Behaviour):
                     HEADUP = False
                     rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
                     return pt.common.Status.SUCCESS
-                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Running')
+                rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Running')
                 return pt.common.Status.RUNNING            
         else:
             rospy.loginfo('Invalid heaed motion was given. The motion \'{}\' was given whereas the valid inputs are \'up\' annd \'down\' ', format({self.direction}))
@@ -785,10 +826,8 @@ class move(pt.behaviour.Behaviour):
                 pass
             self.move_client.send_goal(goal = self.move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
            
-
-
         if MOVEBASESTATUS == 0:
-            # rospy.loginfo(Fore.BLUE + 'MOVE UPDATE = Running')
+            rospy.loginfo(Fore.BLUE + 'MOVE UPDATE = Running')
             return pt.common.Status.RUNNING
         elif MOVEBASESTATUS == 1:
             rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')  
@@ -800,81 +839,25 @@ class move(pt.behaviour.Behaviour):
             # MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
                     
-        # global MOVEBASESTATUS, TRIED_MOVE
-        # self.move_goal = MoveBaseGoal()
-        # print(Fore.YELLOW + 'MOVEBASESTATUS = {}' .format(MOVEBASESTATUS))
-
-        # # Check what the goal pose is
-        # if self.goal_pose == 'pick':
-        #     self.move_goal.target_pose = self.pick_pose
-        # if self.goal_pose == 'place':
-        #     self.move_goal.target_pose = self.place_pose
-
-        # # If it has already succeeded in moving then no need to send goal again
-        # if MOVEBASESTATUS == 1:
-        #     return pt.common.Status.SUCCESS
-
-        # # If it hasn't already tried moving then move (send goal)
-        # if not TRIED_MOVE:
-        #     TRIED_MOVE = True
-        #     print(Fore.BLUE + 'SEND GOAL')
-        #     self.move_client.send_goal(goal = self.move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
-        #     print(Fore.BLUE + 'GOAL SENT')            
-
-
-        # if MOVEBASESTATUS == 0:
-        #     # rospy.loginfo(Fore.BLUE + 'MOVE UPDATE = Running')
-        #     return pt.common.Status.RUNNING
-        # elif MOVEBASESTATUS == 1:
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')  
-        #     MOVEBASESTATUS = 0
-
-        #     return pt.common.Status.SUCCESS
-        # else:
-        #     rospy.loginfo(Fore.RED + 'MOVE UPDATE = Fail')
-        #     # MOVEBASESTATUS = 0
-        #     return pt.common.Status.FAILURE
-
-
-    # def thread_function(self):
-    #     print('THREAD HAS STARTED!!!!!!!!!')
-    #     self.move_client.send_goal(goal = self.move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
-    #     self.move_client.wait_for_result()
-    #     print('WAIT_FOR_RESULT HAS JUST FINISHED!!!')
 
     def move_active_cb(self):
         pass
-        # status = self.move_client.wait_for_result()
-        # rospy.loginfo('move_active_cb')
 
     # Action callbacks
     def move_fb_cb(self, msg):
         global MOVEBASESTATUS
-        #status = self.move_client.wait_for_result()
-        # rospy.loginfo('move_fb_cb function!!')
-        # self.status = 0
         MOVEBASESTATUS = 0
-        # rospy.loginfo('MOVEBASESTATUS IN MOVE_FB_CB = {}' .format(MOVEBASESTATUS))
         return pt.common.Status.RUNNING
         
 
     def move_res_cb(self, state, msg):
         global MOVEBASESTATUS, TRIED_MOVE
-        # rospy.loginfo('move_res_cb function!!')
-        # TRIED_MOVE = False        
-        # if actionlib.TerminalState.SUCCEEDED == state:
-        #     # self.status = 1
-        #     MOVEBASESTATUS = 1
-        #     rospy.loginfo('MOVEBASESTATUS IN RESULT SUCCESS = {}' .format(MOVEBASESTATUS))
-        # else:
-        #     # self.status = 2
-        #     MOVEBASESTATUS = 2
-        #     rospy.loginfo('MOVEBASESTATUS IN RESULT FAIL = {}' .format(MOVEBASESTATUS))
-        # if TRIED_MOVE:
+
         TRIED_MOVE = False
         if actionlib.TerminalState.SUCCEEDED == state:
             # self.status = 1
             MOVEBASESTATUS = 1
+            
             rospy.loginfo('MOVEBASESTATUS IN RESULT SUCCESS = {}' .format(MOVEBASESTATUS))
         else:
             # self.status = 2
