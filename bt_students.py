@@ -60,6 +60,13 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 		# Reinit cube
 		exec_reinitcube = reinitcube()
 
+		# Detect the cube after it has been placed
+		detect_placed_cube = detectplacedcube()
+
+		# check cube
+		exec_check_cube = checkcube()
+
+		exec_cube_state = cubestate()
 
 		# # Control nodes
 
@@ -71,8 +78,6 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 
 		# # Behaviour tree		
 		# tree   = RSequence(name = '"Main sequence', children = [exec_moveheadup, exec_tuckarm, con_n0, con_n2, con_n4])
-
-
 
 		# # Control nodes
 
@@ -90,15 +95,31 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 
 
 		# Control nodes
+	
+		# Place cube
+		place_process_seq = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_moveplace, exec_moveheaddown, exec_placecube, detect_placed_cube])
+		place_sel = pt.composites.Selector(name = 'Place Selector'			, children = [exec_checkplacecube, place_process_seq])
+		# Pick cube
+		grip_cube_seq = pt.composites.Sequence(name = 'gripper cube sequence', children = [exec_checkgripper, exec_cube_state])
+		cube_sel = pt.composites.Selector(name = 'random!!'				, children = [grip_cube_seq, exec_reinitcube])
+		check_pick_grip_cube_seq = pt.composites.Sequence(name = 'Check pick, gripper, cube sequence!', children = [cube_sel, exec_checkpickcube])
+		pick_process_seq = pt.composites.Sequence(name = 'Pick Sequence'			, children = [exec_movepick, exec_moveheaddown, exec_pickcube, exec_moveheadup])
+		pick_sel = pt.composites.Selector(name = 'Pick Selector'			, children = [check_pick_grip_cube_seq, pick_process_seq])
+		# Localization
+		localization_seq  = pt.composites.Sequence(name = 'Localization Sequence'  , children = [exec_moveheadup, exec_tuckarm, exec_clearcostmaps, exec_localization])
+		localization_sel = pt.composites.Selector(name = 'Localization Selector'  , children = [exec_checklocalization, localization_seq])
 
-		new_sel= pt.composites.Selector(name = 'random!!'				, children = [exec_checkgripper, exec_reinitcube])
-		con_n  = pt.composites.Sequence(name = 'Localization Sequence'  , children = [exec_moveheadup, exec_tuckarm, exec_clearcostmaps, exec_localization])
-		con_n0 = pt.composites.Selector(name = 'Localization Selector'  , children = [exec_checklocalization, con_n])	
-		con_a  = pt.composites.Sequence(name = 'Check Pick Sequence'    , children = [exec_checkpickcube, new_sel])	
-		con_n1 = pt.composites.Sequence(name = 'Pick Sequence'			, children = [exec_movepick, exec_moveheaddown, exec_pickcube, exec_moveheadup])
-		con_n2 = pt.composites.Selector(name = 'Pick Selector'			, children = [con_a, con_n1])
-		con_n3 = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_moveplace, exec_moveheaddown, exec_placecube])
-		con_n4 = pt.composites.Selector(name = 'Place Selector'			, children = [exec_checkplacecube, con_n3])
+
+		# gripcube_seq = pt.composites.Selector(name = 'again random!', children = [exec_check_cube, exec_checkgripper])
+		# new_sel= pt.composites.Selector(name = 'random!!'				, children = [gripcube_seq, exec_reinitcube])
+		# con_n  = pt.composites.Sequence(name = 'Localization Sequence'  , children = [exec_moveheadup, exec_tuckarm, exec_clearcostmaps, exec_localization])
+		# con_n0 = pt.composites.Selector(name = 'Localization Selector'  , children = [exec_checklocalization, con_n])	
+		# con_a  = pt.composites.Sequence(name = 'Check Pick Sequence'    , children = [exec_checkpickcube, new_sel])	
+		# con_n1 = pt.composites.Sequence(name = 'Pick Sequence'			, children = [exec_movepick, exec_moveheaddown, exec_pickcube, exec_moveheadup])
+		# con_n2 = pt.composites.Selector(name = 'Pick Selector'			, children = [con_a, con_n1])
+		# # con_n2 = pt.composites.Selector(name = 'Pick Selector'			, children = [exec_checkpickcube, con_n1])
+		# con_n3 = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_moveplace, exec_moveheaddown, exec_placecube, detect_placed_cube])
+		# con_n4 = pt.composites.Selector(name = 'Place Selector'			, children = [exec_checkplacecube, con_n3])
 
 		# con_n  = pt.composites.Sequence(name = 'Localization Sequence'  , children = [exec_moveheadup, exec_tuckarm, exec_clearcostmaps, exec_localization])
 		# con_n0 = pt.composites.Selector(name = 'Localization Selector'  , children = [exec_checklocalization, con_n])	
@@ -109,7 +130,7 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 		# con_n4 = pt.composites.Selector(name = 'Place Selector'			, children = [exec_checkplacecube, con_n3])
 
 		# Behaviour tree		
-		tree   = RSequence(name = '"Main sequence', children = [con_n0, con_n2, con_n4])		
+		tree   = RSequence(name = '"Main sequence', children = [localization_sel, pick_sel, place_sel])
 		super(BehaviourTree, self).__init__(tree)
 
 		# execute the behaviour tree

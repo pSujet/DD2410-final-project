@@ -15,195 +15,35 @@ from gazebo_msgs.msg import ModelState
 from control_msgs.msg import JointTrajectoryControllerState
 from colorama import Fore, Back, Style
 
+import threading
+
+
 # Check Localization
 LOCALIZED = False; TRIED_LOCALIZATION = False
-PICKED = False; PLACED = False; CUBE = True
-HEAD = 'up' # It is by default up
+# checkpick, checekplace
+PICKED = False; PLACED = False
+
+# Move head
 HEADUP = False; HEADDOWN = False
 
-GRIPPER_THRESHOLD = 0.013
+# Status of move base behavior, Check if it tried to move
+MOVEBASESTATUS = 0
+TRIED_MOVE = False
 
-STATUS = 0
+# Gripper, cube detected after place action, cube reinitialization
+GRIPPER_THRESHOLD = 0.014
+DETECTED = False
+CUBESTATE = True
+CUBEPLACED = False
+GRIPPER = False
 
-# Check tuck arm??
-
-
-
-#####################################################################################################
-#                                      checkgripper Class                                          #
-#####################################################################################################
-class checkgripper(pt.behaviour.Behaviour):
-    def __init__(self):
-        # rospy.loginfo('CHECK GRIPPER INIT')
-        rospy.Subscriber('/gripper_controller/state', JointTrajectoryControllerState, self.check_gripper_cb)
-        super(checkgripper, self).__init__('Check Gripper')
-
-    def update(self):
-        global GRIPPER_THRESHOLD, CUBE, PICKED
-        rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER UPDATE')
-        if abs(self.gripper_state.actual.positions[0]) < GRIPPER_THRESHOLD and abs(self.gripper_state.actual.positions[1]) < GRIPPER_THRESHOLD :
-            rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER = Fail')
-            CUBE = False
-            #PICKED = False
-            return pt.common.Status.FAILURE
-        else:
-            # CUBE = True
-            # PICKED = True
-            rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER = Success')
-            return pt.common.Status.SUCCESS
-
-
-    def check_gripper_cb(self, msg):
-        self.gripper_state = msg
-
-#####################################################################################################
-#                                           reinitcube Class                                       #
-#####################################################################################################
-class reinitcube(pt.behaviour.Behaviour):
-    def __init__(self):
-        self.set_cube_state_srv = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
-        rospy.wait_for_service('/gazebo/set_model_state', timeout = 30)
-        self.model_state = ModelState()
-        self.model_state.model_name = 'aruco_cube'
-        self.model_state.pose.position.x = -1.130530
-        self.model_state.pose.position.y = -6.653650
-        self.model_state.pose.position.z = 0.86250
-        self.model_state.pose.orientation.x = 0
-        self.model_state.pose.orientation.y = 0
-        self.model_state.pose.orientation.z = 0
-        self.model_state.pose.orientation.w = 1
-        self.model_state.twist.linear.x = 0
-        self.model_state.twist.linear.y = 0
-        self.model_state.twist.linear.z = 0
-        self.model_state.twist.angular.x = 0
-        self.model_state.twist.angular.y = 0
-        self.model_state.twist.angular.z = 0
-        self.model_state.reference_frame = 'map'
-
-        super(reinitcube, self).__init__('Reinitialize cube')
-
-    def update(self):
-        
-        # Over here I might need to add conditions to check for the state of the cube (using the data from topic /robotics_intro/aruco_single/position)
-        global CUBE, PICKED
-        if CUBE == False:
-            PICKED = False
-            self.move_head_req = self.set_cube_state_srv(self.model_state)
-        CUBE = True
-        rospy.loginfo(Fore.GREEN + 'REINITCUBE = Success')
-        return pt.common.Status.SUCCESS
-
-#####################################################################################################
-#                                           movehead Class                                          #
-#####################################################################################################
-class moveheadup(pt.behaviour.Behaviour):
-    def __init__(self):
-        #rospy.loginfo('MOVE HEAD UP INIT')
-        mv_head_up_srv_nm = rospy.get_param(rospy.get_name() + '/move_head_srv')
-        self.move_head_up_srv = rospy.ServiceProxy(mv_head_up_srv_nm, MoveHead)
-        rospy.wait_for_service(mv_head_up_srv_nm, timeout=  30)
-
-        super(moveheadup, self).__init__('move head up')
-
-    def update(self):
-        global HEADUP, HEADDOWN
-        
-        if HEADUP:
-            rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP UPDATE = Success')
-            return pt.common.Status.SUCCESS
-        else:
-            move_head_up_srv_req = self.move_head_up_srv('up')
-
-            if move_head_up_srv_req:
-                HEADUP = True
-                HEADDOWN = False
-                rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP UPDATE = Success')
-                return pt.common.Status.SUCCESS
-            rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP UPDATE = Running')
-            return pt.common.Status.RUNNING 
-
-class moveheaddown(pt.behaviour.Behaviour):
-    def __init__(self):
-        rospy.loginfo('MOVE HEAD DOWN INIT')
-        mv_head_down_srv_nm = rospy.get_param(rospy.get_name() + '/move_head_srv')
-        self.move_head_down_srv = rospy.ServiceProxy(mv_head_down_srv_nm, MoveHead)
-        rospy.wait_for_service(mv_head_down_srv_nm, timeout=  30)
-
-        super(moveheaddown, self).__init__('move head down')
-
-    def update(self):
-        global HEADUP, HEADDOWN
-        
-        if HEADDOWN:
-            rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
-            return pt.common.Status.SUCCESS
-        else:
-            move_head_down_srv_req = self.move_head_down_srv('down')
-
-            if move_head_down_srv_req:
-                HEADUP = False
-                HEADDOWN = True
-                rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
-                return pt.common.Status.SUCCESS
-            rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Running')
-            return pt.common.Status.RUNNING 
-
-class movehead(pt.behaviour.Behaviour):
-
-    def __init__(self, direction):
-        global HEAD
-        #rospy.loginfo("Initialising move head behaviour.")
-
-        # server
-        mv_head_srv_nm = rospy.get_param(rospy.get_name() + '/move_head_srv')
-        self.move_head_srv = rospy.ServiceProxy(mv_head_srv_nm, MoveHead)
-        rospy.wait_for_service(mv_head_srv_nm, timeout=30)
-
-        # head movement direction; "down" or "up"
-        self.direction = direction
-        rospy.sleep(3)
-
-        # become a behaviour
-        super(movehead, self).__init__("Move head!")
-
-
-    def update(self):
-        global HEADUP, HEADDOWN
-
-        if self.direction == 'up':
-            if HEADUP:
-                rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
-                return pt.common.Status.SUCCESS
-            else:
-                move_head_srv_req = self.move_head_srv('up')
-
-                if move_head_srv_req:
-                    HEADUP = True
-                    HEADDOWN = False
-                    rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
-                    return pt.common.Status.SUCCESS
-                rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Running')
-
-                return pt.common.Status.RUNNING
-        elif self.direction == 'down':
-            if HEADDOWN:
-                rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
-                return pt.common.Status.SUCCESS
-            else:
-                move_head_srv_req = self.move_head_srv('down')
-
-                if move_head_srv_req:
-                    HEADDOWN = True
-                    HEADUP = False
-                    rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
-                    return pt.common.Status.SUCCESS
-                rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Running')
-                return pt.common.Status.RUNNING            
-        else:
-            rospy.loginfo('Invalid heaed motion was given. The motion \'{}\' was given whereas the valid inputs are \'up\' annd \'down\' ', format({self.direction}))
-            rospy.loginfo(Fore.GREEN + 'MOVE HEAD = Failure')
-            return pt.common.Status.FAILURE
-            
+#############################################################################################################################
+#                                                                                                                           #
+#                                                                                                                           #
+#                                                      LOCALIZATION                                                         #
+#                                                                                                                           #
+#                                                                                                                           #
+#############################################################################################################################
 #####################################################################################################
 #                                           tuckarm Class                                           #
 #####################################################################################################
@@ -245,7 +85,7 @@ class tuckarm(pt.behaviour.Behaviour):
         elif not self.sent_goal:
             self.play_motion_ac.send_goal(self.goal)
             self.sent_goal = True
-            rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
+            # rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
             return pt.common.Status.RUNNING
 
         if self.play_motion_ac.get_result():
@@ -265,12 +105,12 @@ class tuckarm(pt.behaviour.Behaviour):
 
         # if failed
         elif not self.play_motion_ac.get_result():
-            rospy.loginfo(Fore.GREEN + 'Tuck arm = Fail')
+            # rospy.loginfo(Fore.GREEN + 'Tuck arm = Fail')
             return pt.common.Status.FAILURE
 
         # if I'm still trying :|
         else:
-            rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
+            # rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
             return pt.common.Status.RUNNING
         # # already tucked the arm
         # if self.finished: 
@@ -310,17 +150,17 @@ class checklocalization(pt.behaviour.Behaviour):
         rospy.loginfo("Initializing check for localization")
         amcl_estimate = rospy.get_param(rospy.get_name() + '/amcl_estimate')
         rospy.Subscriber(amcl_estimate, PoseWithCovarianceStamped, self.amcl_estimate_cb)
-        print("1111111111111111111111111111111111111111111111111")
+        # print("1111111111111111111111111111111111111111111111111")
 
         super(checklocalization, self).__init__("Check if localized")
          
     def update(self):
-        print("2222222222222222222222222222222222222222222222222")
+        # print("2222222222222222222222222222222222222222222222222")
         #rospy.loginfo('CHECK LOCALIZATION UPDATE')
         global LOCALIZED
 
         if LOCALIZED:
-            rospy.loginfo(Fore.GREEN + 'CHECK LOCALIZATION UPDATE = Success')
+            # rospy.loginfo(Fore.GREEN + 'CHECK LOCALIZATION UPDATE = Success')
             return pt.common.Status.SUCCESS
         else:
             rospy.loginfo(Fore.GREEN + 'CHECK LOCALIZATION UPDATE = Fail')
@@ -336,8 +176,8 @@ class checklocalization(pt.behaviour.Behaviour):
 #####################################################################################################
 class localization(pt.behaviour.Behaviour):
     def __init__(self):
-        rospy.loginfo('LOCALIZATION INIT')
-        rospy.loginfo('Initializing localization')
+        #rospy.loginfo('LOCALIZATION INIT')
+        rospy.loginfo('Initializing localization Behavior')
 
         # Parameters
         global_loc_srv = rospy.get_param(rospy.get_name() + '/global_loc_srv')
@@ -367,6 +207,7 @@ class localization(pt.behaviour.Behaviour):
 
         # global DICT
         global LOCALIZED, TRIED_LOCALIZATION
+        global MOVEBASESTATUS, TRIED_MOVE
 
         if LOCALIZED:
             #TRIED_LOCALIZATION = False
@@ -383,7 +224,7 @@ class localization(pt.behaviour.Behaviour):
         if np.linalg.norm(self.amcl_estimation.pose.covariance) > 0.025:
             vel.angular.z = 0.5
             self.cmd_vel_pub.publish(vel)
-            rospy.loginfo(Fore.GREEN + 'LOCALIZATION UPDATE = Running')
+            #rospy.loginfo(Fore.GREEN + 'LOCALIZATION UPDATE = Running')
             return pt.common.Status.RUNNING
         else:
             vel.angular.z = 0
@@ -391,6 +232,9 @@ class localization(pt.behaviour.Behaviour):
             LOCALIZED = True
             TRIED_LOCALIZATION = False
             rospy.loginfo(Fore.GREEN + 'LOCALIZATION UPDATE = Success')
+
+            # MOVEBASESTATUS = 0
+            # TRIED_MOVE = False
             return pt.common.Status.SUCCESS
       
         # global LOCALIZED, TRIED_LOCALIZATION
@@ -420,6 +264,131 @@ class localization(pt.behaviour.Behaviour):
         #     return pt.common.Status.SUCCESS
 
 #####################################################################################################
+#                                      Clear Costmap Class                                          #
+#####################################################################################################
+class clearcostmaps(pt.behaviour.Behaviour):
+    def __init__(self):
+        clear_costmaps_srv = rospy.get_param(rospy.get_name() + '/clear_costmaps_srv')
+        # rospy.loginfo('CLEAR COSTMAPS INIT')
+        # Services
+        self.clear_costmaps_srv_client = rospy.ServiceProxy(clear_costmaps_srv, Empty)
+        rospy.wait_for_service(clear_costmaps_srv, timeout = 30)
+
+        super(clearcostmaps, self).__init__('Clear costmaps')
+        # execution checker
+        self.tried = False
+        self.done = False
+    
+    def update(self):
+        self.clear_costmaps_srv_client()
+        rospy.loginfo(Fore.GREEN + 'CLEAR COSTMAPS = Success')
+        rospy.sleep(1)
+        return pt.common.Status.SUCCESS
+        # if self.done:
+        #     rospy.loginfo(Fore.GREEN + 'CLEAR COSTMAPS = Success')
+        #     return pt.common.Status.SUCCESS
+        # else: #not self.tried:
+        #     self.req = self.clear_costmaps_srv_client()
+        #     rospy.loginfo(Fore.GREEN + 'CLEAR COSTMAPS = Running')
+        #     self.tried = True
+        #     #rospy.sleep(1)
+        #     return pt.common.Status.RUNNING
+        # elif self.req:
+        #     self.done = True
+        #     self.tried = False
+        #     return pt.common.Status.SUCCESS
+        # else:
+        #     return pt.common.Status.FAILURE
+
+#############################################################################################################################
+#                                                                                                                           #
+#                                                                                                                           #
+#                                                        PICK CUBE                                                          #
+#                                                                                                                           #
+#                                                                                                                           #
+#############################################################################################################################
+
+#####################################################################################################
+#                                       cube state Class                                            #
+#####################################################################################################
+class cubestate(pt.behaviour.Behaviour):
+
+    def __init__(self):
+        super(cubestate, self).__init__()
+
+    def update(self):
+        global CUBESTATE
+        if CUBESTATE == True:
+            return pt.common.Status.SUCCESS
+        else:
+            return pt.common.Status.FAILURE
+
+#####################################################################################################
+#                                      checkgripper Class                                          #
+#####################################################################################################
+class checkgripper(pt.behaviour.Behaviour):
+    def __init__(self):
+        rospy.Subscriber('/gripper_controller/state', JointTrajectoryControllerState, self.check_gripper_cb)
+        super(checkgripper, self).__init__('Check Gripper')
+
+    def update(self):
+        global GRIPPER_THRESHOLD, CUBESTATE, PICKED, GRIPPER
+    
+        if abs(self.gripper_state.actual.positions[0]) < GRIPPER_THRESHOLD and abs(self.gripper_state.actual.positions[1]) < GRIPPER_THRESHOLD :
+            rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER = Fail')
+            # rospy.loginfo('gripper state = {}' .format(self.gripper_state.actual.positions))
+            # GRIPPER = True
+            return pt.common.Status.FAILURE
+          
+        else:
+            rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER = Success')
+            return pt.common.Status.SUCCESS
+
+
+    def check_gripper_cb(self, msg):
+        self.gripper_state = msg
+
+#####################################################################################################
+#                                           reinitcube Class                                       #
+#####################################################################################################
+class reinitcube(pt.behaviour.Behaviour):
+    def __init__(self):
+        self.set_cube_state_srv = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
+        rospy.wait_for_service('/gazebo/set_model_state', timeout = 30)
+        self.model_state = ModelState()
+        self.model_state.model_name = 'aruco_cube'
+        self.model_state.pose.position.x = -1.130530
+        self.model_state.pose.position.y = -6.653650
+        self.model_state.pose.position.z = 0.86250
+        self.model_state.pose.orientation.x = 0
+        self.model_state.pose.orientation.y = 0
+        self.model_state.pose.orientation.z = 0
+        self.model_state.pose.orientation.w = 1
+        self.model_state.twist.linear.x = 0
+        self.model_state.twist.linear.y = 0
+        self.model_state.twist.linear.z = 0
+        self.model_state.twist.angular.x = 0
+        self.model_state.twist.angular.y = 0
+        self.model_state.twist.angular.z = 0
+        self.model_state.reference_frame = 'map'
+
+        super(reinitcube, self).__init__('Reinitialize cube')
+
+    def update(self):
+        
+        # Over here I might need to add conditions to check for the state of the cube (using the data from topic /robotics_intro/aruco_single/position)
+        global CUBESTATE, PICKED, GRIPPER, TRIED_MOVE
+        self.move_head_req = self.set_cube_state_srv(self.model_state)
+        if not GRIPPER:
+            PICKED = False
+            TRIED_MOVE =False
+            GRIPPER = True
+            rospy.loginfo('does it work???????????????????????????????')
+
+        rospy.loginfo(Fore.GREEN + 'REINITCUBE = Success')
+        return pt.common.Status.SUCCESS
+
+#####################################################################################################
 #                                     checkpickcube Class                                           #
 #####################################################################################################
 class checkpickcube(pt.behaviour.Behaviour):
@@ -429,7 +398,7 @@ class checkpickcube(pt.behaviour.Behaviour):
 
     def update(self):
         
-        global PICKED
+        global PICKED, MOVEBASESTATUS
         
         if PICKED:
             rospy.loginfo(Fore.GREEN + 'CHECK PICK CUBE = Success')
@@ -437,6 +406,7 @@ class checkpickcube(pt.behaviour.Behaviour):
             
         else:
             rospy.loginfo(Fore.GREEN + 'CHECK PICK CUBE = Fail')
+            MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
 
 #####################################################################################################
@@ -481,7 +451,7 @@ class pickcube(pt.behaviour.Behaviour):
 
         # execution checker
         self.tried = False
-        self.done = False
+        # self.done = False
 
         # become a behaviour
         super(pickcube, self).__init__("Pick Cube!")
@@ -490,40 +460,79 @@ class pickcube(pt.behaviour.Behaviour):
     def update(self):
         global PICKED
 
-        # success if done
-        if self.done:
-            PICKED = True
-            rospy.loginfo(Fore.GREEN + 'PICK CUBE = Success')
-            return pt.common.Status.SUCCESS
-
-        # try if not tried
-        elif not self.tried:
+        if not self.tried:
 
             # command
             self.pick_cube_req = self.pick_cube_srv()
             self.tried = True
 
             # tell the tree you're running
-            rospy.loginfo(Fore.GREEN + 'PICK CUBE = Running')
+            # rospy.loginfo(Fore.GREEN + 'PICK CUBE = Running')
             return pt.common.Status.RUNNING
 
         # if succesful
         elif self.pick_cube_req.success:
-            self.done = True
+            self.tried = False
             PICKED = True
             rospy.loginfo(Fore.GREEN + 'PICK CUBE = Success')
             return pt.common.Status.SUCCESS
 
         # if failed
         elif not self.pick_cube_req.success:
-            rospy.loginfo(Fore.GREEN + 'PICK CUBE = Fail')
+            # rospy.loginfo(Fore.GREEN + 'PICK CUBE = Fail')
             return pt.common.Status.FAILURE
 
         # if still trying
         else:
-            rospy.loginfo(Fore.GREEN + 'PICK CUBE = Running')
+            # rospy.loginfo(Fore.GREEN + 'PICK CUBE = Running')
             return pt.common.Status.RUNNING
 
+#############################################################################################################################
+#                                                                                                                           #
+#                                                                                                                           #
+#                                                        PLACE CUBE                                                         #
+#                                                                                                                           #
+#                                                                                                                           #
+#############################################################################################################################
+
+#####################################################################################################
+#                                   detectplacedcube Class                                          #
+#####################################################################################################
+class detectplacedcube(pt.behaviour.Behaviour):
+    def __init__(self):
+        rospy.loginfo('Initliazing Detect Placed Cube Behavior!')
+
+        # Subscriber: /robotics_intro/aruco_single/position
+        rospy.Subscriber('/robotics_intro/aruco_single/position', Vector3Stamped, self.detect_cube_cb)
+
+        super(detectplacedcube, self).__init__('Detect placed cube')
+
+    def update(self):
+        global PLACED, PICKED, DETECTED, CUBEPLACED
+        try:
+            rospy.wait_for_message('/robotics_intro/aruco_single/position', Vector3Stamped, timeout=1)
+        except:
+            DETECTED = False
+
+        if PLACED:
+            if DETECTED:
+                # CUBEPLACED = True
+                return pt.common.Status.SUCCESS
+            else:
+                PICKED = False
+                PLACED = False
+                # CUBEPLACED = False
+                return pt.common.Status.FAILURE
+
+        return super().update()
+
+    def detect_cube_cb(self, msg):
+        global PLACED, DETECTED, PICKED
+        # rospy.loginfo('DETECT_ARUCO_CB FUNCTION')
+        if PLACED == True and PICKED == True:
+            rospy.loginfo('DETECT_ARUCO_CB FUNCTION IF STATEMENT TRUE!!')
+            DETECTED = True
+            
 #####################################################################################################
 #                                     checkplacecube Class                                          #
 #####################################################################################################
@@ -534,12 +543,14 @@ class checkplacecube(pt.behaviour.Behaviour):
 
     def update(self):
         
-        global PLACED
+        global PLACED, TRIED_MOVE, MOVEBASESTATUS
         if PLACED:
             rospy.loginfo(Fore.GREEN + 'CHECK PLACE CUBE = Success')
             return pt.common.Status.SUCCESS
         else:
-            rospy.loginfo(Fore.GREEN + 'CHECK PLACE CUBE = Fail')
+            rospy.loginfo(Fore.RED + 'CHECK PLACE CUBE = Fail')
+
+            MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
 
 #####################################################################################################
@@ -569,78 +580,129 @@ class placecube(pt.behaviour.Behaviour):
     
 
     def update(self):
+        global PLACED
         # success if done
-        if self.done:
-            rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Success')
-            return pt.common.Status.SUCCESS
+        # if self.done:
+        #     rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Success')
+        #     PLACED = True
+        #     return pt.common.Status.SUCCESS
 
         # try if not tried
-        elif not self.tried:
+        if not self.tried:
 
             # command
             self.place_cube_req = self.place_cube_srv()
             self.tried = True
 
             # tell the tree you're running
-            rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
+            # rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
             return pt.common.Status.RUNNING
 
         # if succesful
         elif self.place_cube_req.success:
-            self.done = True
+            self.tried = False
             rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Success')
+            PLACED = True
             return pt.common.Status.SUCCESS
 
         # if failed
         elif not self.place_cube_req.success:
-            rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Fail')
+            rospy.loginfo(Fore.RED + 'PLACE CUBE = Fail')
+            PLACED = False
             return pt.common.Status.FAILURE
 
         # if still trying
         else:
-            rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
+            # rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
             return pt.common.Status.RUNNING
 
+#############################################################################################################################
+#                                                                                                                           #
+#                                                                                                                           #
+#                                                       OTHERS CUBE                                                         #
+#                                                                                                                           #
+#                                                                                                                           #
+#############################################################################################################################
+
 #####################################################################################################
-#                                      Clear Costmap Class                                          #
+#                                     check cube Class                                              #
 #####################################################################################################
-class clearcostmaps(pt.behaviour.Behaviour):
+class checkcube(pt.behaviour.Behaviour):
     def __init__(self):
-        clear_costmaps_srv = rospy.get_param(rospy.get_name() + '/clear_costmaps_srv')
-        # rospy.loginfo('CLEAR COSTMAPS INIT')
-        # Services
-        self.clear_costmaps_srv_client = rospy.ServiceProxy(clear_costmaps_srv, Empty)
-        rospy.wait_for_service(clear_costmaps_srv, timeout = 30)
+        super(checkcube, self).__init__('Check cube has been placed in the position')
 
-        super(clearcostmaps, self).__init__('Clear costmaps')
-        # execution checker
-        self.tried = False
-        self.done = False
-    
     def update(self):
-        self.clear_costmaps_srv_client()
-        rospy.loginfo(Fore.GREEN + 'CLEAR COSTMAPS = Success')
-        rospy.sleep(1)
-        return pt.common.Status.SUCCESS
-        # if self.done:
-        #     rospy.loginfo(Fore.GREEN + 'CLEAR COSTMAPS = Success')
-        #     return pt.common.Status.SUCCESS
-        # else: #not self.tried:
-        #     self.req = self.clear_costmaps_srv_client()
-        #     rospy.loginfo(Fore.GREEN + 'CLEAR COSTMAPS = Running')
-        #     self.tried = True
-        #     #rospy.sleep(1)
-        #     return pt.common.Status.RUNNING
-        # elif self.req:
-        #     self.done = True
-        #     self.tried = False
-        #     return pt.common.Status.SUCCESS
-        # else:
-        #     return pt.common.Status.FAILURE
-
+        global CUBEPLACED, CUBESTATE , DETECTED
 
         
-        
+        if DETECTED == True:
+            rospy.loginfo(Fore.GREEN + 'CHECK CUBESTATE PLACED = Success')
+            return pt.common.Status.SUCCESS
+            
+        else:
+            rospy.loginfo(Fore.GREEN + 'CHECK CUBESTATE PLACED = Fail')
+            CUBESTATE = False
+            return pt.common.Status.FAILURE
+
+#####################################################################################################
+#                                           movehead Class                                          #
+#####################################################################################################
+class movehead(pt.behaviour.Behaviour):
+
+    def __init__(self, direction):
+        global HEAD
+        #rospy.loginfo("Initialising move head behaviour.")
+
+        # server
+        mv_head_srv_nm = rospy.get_param(rospy.get_name() + '/move_head_srv')
+        self.move_head_srv = rospy.ServiceProxy(mv_head_srv_nm, MoveHead)
+        rospy.wait_for_service(mv_head_srv_nm, timeout=30)
+
+        # head movement direction; "down" or "up"
+        self.direction = direction
+        rospy.sleep(3)
+
+        # become a behaviour
+        super(movehead, self).__init__("Move head!")
+
+
+    def update(self):
+        global HEADUP, HEADDOWN
+
+        if self.direction == 'up':
+            if HEADUP:
+                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
+                return pt.common.Status.SUCCESS
+            else:
+                move_head_srv_req = self.move_head_srv('up')
+
+                if move_head_srv_req:
+                    HEADUP = True
+                    HEADDOWN = False
+                    rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
+                    return pt.common.Status.SUCCESS
+                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Running')
+
+                return pt.common.Status.RUNNING
+        elif self.direction == 'down':
+            if HEADDOWN:
+                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
+                return pt.common.Status.SUCCESS
+            else:
+                move_head_srv_req = self.move_head_srv('down')
+
+                if move_head_srv_req:
+                    HEADDOWN = True
+                    HEADUP = False
+                    rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Success')
+                    return pt.common.Status.SUCCESS
+                # rospy.loginfo(Fore.GREEN + 'MOVE HEAD DOWN = Running')
+                return pt.common.Status.RUNNING            
+        else:
+            rospy.loginfo('Invalid heaed motion was given. The motion \'{}\' was given whereas the valid inputs are \'up\' annd \'down\' ', format({self.direction}))
+            rospy.loginfo(Fore.GREEN + 'MOVE HEAD = Failure')
+            return pt.common.Status.FAILURE
+
 #####################################################################################################
 #                                           move Class                                              #
 #####################################################################################################
@@ -654,7 +716,7 @@ class move(pt.behaviour.Behaviour):
         self.reached_position = False
         self.in_progress = False
 
-        #self.status = {"STATUS":"PENDING"}
+        #self.status = {"MOVEBASESTATUS":"PENDING"}
         #self.status = 0
 
         # Parameters
@@ -694,94 +756,130 @@ class move(pt.behaviour.Behaviour):
 
         super(move, self).__init__('Move robot')
 
+
+
     def update(self):
-        global STATUS
-        move_goal = MoveBaseGoal()
+        global MOVEBASESTATUS, TRIED_MOVE
+        self.move_goal = MoveBaseGoal()
+        print(Fore.YELLOW + 'MOVEBASESTATUS = {}' .format(MOVEBASESTATUS))
 
+        # Check what the goal pose is
         if self.goal_pose == 'pick':
-            move_goal.target_pose = self.pick_pose
+            target = "pick"
+            self.move_goal.target_pose = self.pick_pose
         if self.goal_pose == 'place':
-            move_goal.target_pose = self.place_pose
+            target = "place"
+            self.move_goal.target_pose = self.place_pose
 
-        self.move_client.send_goal(goal = move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
-        self.move_client.wait_for_result()
-        rospy.loginfo("============================0")
+        # If it has already succeeded in moving then no need to send goal again
+        if MOVEBASESTATUS == 1:
+            return pt.common.Status.SUCCESS
 
-        # status = self.move_client.wait_for_result()
-        # print('44444444444444444444444444444444444444444444444444444444444444')
-        # print('status = {}' .format(status))
-        # print('type of status = {}' .format(type(status)))
-        # self.reached_position = True
+        # If it hasn't already tried moving then move (send goal)
+        if not TRIED_MOVE:
+            TRIED_MOVE = True
+            print(Fore.BLUE + 'SEND GOAL' + target)
+            try:
+                self.move_client.cancel_all_goals()
+            except:
+                pass
+            self.move_client.send_goal(goal = self.move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
+           
 
-        # if not self.reached_position:
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Fail')
-        #     return pt.common.Status.FAILURE
-        # if status:
-        #     self.reached_position = True
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')
-        #     return pt.common.Status.SUCCESS
 
-        # if status:
-        #     self.reached_position = True
-        #     return pt.common.Status.SUCCESS
-        # if not self.reached_position:
-        #     return pt.common.Status.FAILURE
-        
-        # if self.status['STATUS'] == "RUNNING":
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Running')
-        #     return pt.common.Status.RUNNING
-        # elif self.status['STATUS'] == "SUCCESS":
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')  
-        #     return pt.common.Status.SUCCESS
-        # else:
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Fail')
-        #     return pt.common.Status.FAILURE
-
-        # if self.status == 0:
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Running')
-        #     return pt.common.Status.RUNNING
-        # elif self.status == 1:
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')  
-        #     return pt.common.Status.SUCCESS
-        # else:
-        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Fail')
-        #     return pt.common.Status.FAILURE
-
-        if STATUS == 0:
-            rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Running')
-            
+        if MOVEBASESTATUS == 0:
+            # rospy.loginfo(Fore.BLUE + 'MOVE UPDATE = Running')
             return pt.common.Status.RUNNING
-        elif STATUS == 1:
+        elif MOVEBASESTATUS == 1:
             rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')  
+            MOVEBASESTATUS = 0
+
             return pt.common.Status.SUCCESS
         else:
-            rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Fail')
+            rospy.loginfo(Fore.RED + 'MOVE UPDATE = Fail')
+            # MOVEBASESTATUS = 0
             return pt.common.Status.FAILURE
+                    
+        # global MOVEBASESTATUS, TRIED_MOVE
+        # self.move_goal = MoveBaseGoal()
+        # print(Fore.YELLOW + 'MOVEBASESTATUS = {}' .format(MOVEBASESTATUS))
+
+        # # Check what the goal pose is
+        # if self.goal_pose == 'pick':
+        #     self.move_goal.target_pose = self.pick_pose
+        # if self.goal_pose == 'place':
+        #     self.move_goal.target_pose = self.place_pose
+
+        # # If it has already succeeded in moving then no need to send goal again
+        # if MOVEBASESTATUS == 1:
+        #     return pt.common.Status.SUCCESS
+
+        # # If it hasn't already tried moving then move (send goal)
+        # if not TRIED_MOVE:
+        #     TRIED_MOVE = True
+        #     print(Fore.BLUE + 'SEND GOAL')
+        #     self.move_client.send_goal(goal = self.move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
+        #     print(Fore.BLUE + 'GOAL SENT')            
+
+
+        # if MOVEBASESTATUS == 0:
+        #     # rospy.loginfo(Fore.BLUE + 'MOVE UPDATE = Running')
+        #     return pt.common.Status.RUNNING
+        # elif MOVEBASESTATUS == 1:
+        #     rospy.loginfo(Fore.GREEN + 'MOVE UPDATE = Success')  
+        #     MOVEBASESTATUS = 0
+
+        #     return pt.common.Status.SUCCESS
+        # else:
+        #     rospy.loginfo(Fore.RED + 'MOVE UPDATE = Fail')
+        #     # MOVEBASESTATUS = 0
+        #     return pt.common.Status.FAILURE
+
+
+    # def thread_function(self):
+    #     print('THREAD HAS STARTED!!!!!!!!!')
+    #     self.move_client.send_goal(goal = self.move_goal, active_cb = self.move_active_cb, feedback_cb = self.move_fb_cb, done_cb=self.move_res_cb)
+    #     self.move_client.wait_for_result()
+    #     print('WAIT_FOR_RESULT HAS JUST FINISHED!!!')
 
     def move_active_cb(self):
-        # self.move_client.wait_for_result()
-        rospy.loginfo('LETS SEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE!!!!!!!!!!!')
+        pass
+        # status = self.move_client.wait_for_result()
+        # rospy.loginfo('move_active_cb')
 
     # Action callbacks
     def move_fb_cb(self, msg):
-        global STATUS
+        global MOVEBASESTATUS
         #status = self.move_client.wait_for_result()
         # rospy.loginfo('move_fb_cb function!!')
         # self.status = 0
-        STATUS = 0
+        MOVEBASESTATUS = 0
+        # rospy.loginfo('MOVEBASESTATUS IN MOVE_FB_CB = {}' .format(MOVEBASESTATUS))
         return pt.common.Status.RUNNING
         
 
     def move_res_cb(self, state, msg):
-        global STATUS
-        rospy.loginfo('move_res_cb function!!')
+        global MOVEBASESTATUS, TRIED_MOVE
+        # rospy.loginfo('move_res_cb function!!')
+        # TRIED_MOVE = False        
+        # if actionlib.TerminalState.SUCCEEDED == state:
+        #     # self.status = 1
+        #     MOVEBASESTATUS = 1
+        #     rospy.loginfo('MOVEBASESTATUS IN RESULT SUCCESS = {}' .format(MOVEBASESTATUS))
+        # else:
+        #     # self.status = 2
+        #     MOVEBASESTATUS = 2
+        #     rospy.loginfo('MOVEBASESTATUS IN RESULT FAIL = {}' .format(MOVEBASESTATUS))
+        # if TRIED_MOVE:
+        TRIED_MOVE = False
         if actionlib.TerminalState.SUCCEEDED == state:
             # self.status = 1
-            STATUS = 1
+            MOVEBASESTATUS = 1
+            rospy.loginfo('MOVEBASESTATUS IN RESULT SUCCESS = {}' .format(MOVEBASESTATUS))
         else:
             # self.status = 2
-            STATUS = 2
-            
+            MOVEBASESTATUS = 2
+            rospy.loginfo('MOVEBASESTATUS IN RESULT FAIL = {}' .format(MOVEBASESTATUS))            
 
     # Subscriber callbacks
     def pick_pose_cb(self, msg):
@@ -799,7 +897,6 @@ class move(pt.behaviour.Behaviour):
             self.move_client.cancel_all_goals()
             # self.clear_costmaps_srv_client()
             LOCALIZED = False
-
 
 
 
