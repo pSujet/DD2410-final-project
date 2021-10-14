@@ -69,6 +69,20 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 		exec_check_cube = checkcube()
 
 		exec_cube_state = cubestate()
+		
+		exec_setcubestate = setcubestate()
+
+		exec_checkdetectedplacecube = checkdetectedplacecube()
+		# exec_movearm = movearm()
+
+		exec_rotate_ccw = rotate_ccw(np.pi/6)
+		exec_rotate_cw = rotate_cw(np.pi/6)
+
+
+
+
+
+
 
 		# # Control nodes
 
@@ -97,18 +111,21 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 
 
 		# Control nodes
+		
 		# Place cube
 		check_place_seq = pt.composites.Sequence(name = 'check place sequence', children = [exec_checkplacecube, detect_placed_cube])
-		place_process_seq = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_moveplace, exec_moveheaddown, exec_placecube])
+		place_process_seq = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_checkdetectedplacecube, exec_moveplace, exec_moveheaddown, exec_placecube])
 		place_sel = pt.composites.Selector(name = 'Place Selector'			, children = [check_place_seq, place_process_seq])
 		# Pick cube
-		rein_seq = pt.composites.Sequence(neme = 'Rein cube Sequence', children = [exec_reinitcube,exec_moveheadup,exec_tuckarm])
+		cw_sel = pt.composites.Selector(name="Turn CW", children=[counter(11, "?"), go("Rotate!", 0, -0.5)])
+		rein_seq = pt.composites.Sequence(neme = 'Rein cube Sequence', children = [exec_reinitcube,exec_moveheadup,cw_sel,exec_tuckarm, exec_setcubestate])
 		detectcube_headup_sel = pt.composites.Selector(name = 'detect cube, move head up selector', children = [detect_picked_cube, exec_moveheadup])
 		grip_cube_seq = pt.composites.Sequence(name = 'gripper cube sequence', children = [exec_checkgripper, exec_cube_state])
 		cube_sel = pt.composites.Selector(name = 'random!!'				, children = [grip_cube_seq, rein_seq])
 		check_pick_grip_cube_seq = pt.composites.Sequence(name = 'Check pick, gripper, cube sequence!', children = [cube_sel, exec_checkpickcube])
 		pick_process_seq = pt.composites.Sequence(name = 'Pick Sequence'			, children = [exec_movepick, exec_moveheaddown, exec_pickcube, detectcube_headup_sel])
 		pick_sel = pt.composites.Selector(name = 'Pick Selector'			, children = [check_pick_grip_cube_seq, pick_process_seq])
+
 		# Localization
 		localization_seq  = pt.composites.Sequence(name = 'Localization Sequence'  , children = [exec_moveheadup, exec_tuckarm, exec_clearcostmaps, exec_localization])
 		localization_sel = pt.composites.Selector(name = 'Localization Selector'  , children = [exec_checklocalization, localization_seq])
@@ -150,6 +167,8 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 
 		# Behaviour tree		
 		tree   = RSequence(name = '"Main sequence', children = [localization_sel, pick_sel, place_sel])
+		# tree   = RSequence(name = '"Main sequence', children = [cw_sel])
+		# tree   = RSequence(name = '"Main sequence', children = [exec_movearm])
 		super(BehaviourTree, self).__init__(tree)
 
 		# execute the behaviour tree

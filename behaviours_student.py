@@ -12,8 +12,9 @@ import numpy as np
 from move_base_msgs.msg import MoveBaseAction, MoveBaseActionFeedback, MoveBaseGoal, MoveBaseResult
 from gazebo_msgs.srv import SetModelState
 from gazebo_msgs.msg import ModelState
-from control_msgs.msg import JointTrajectoryControllerState
+from control_msgs.msg import JointTrajectoryControllerState, FollowJointTrajectoryAction, FollowJointTrajectoryActionGoal
 from colorama import Fore, Back, Style
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 import threading
 
@@ -38,6 +39,14 @@ CUBESTATE = True
 CUBEPLACED = False
 TRIED_PICK = False
 TRIED_PLACE = False
+DETECTPLACEDCUBE = True
+
+TUCK_ARM = False
+TUCK_STATUS = 0
+
+CANCELMOVE = False
+ROTATE_CCW = False
+ROTATE_CW = False
 
 #############################################################################################################################
 #                                                                                                                           #
@@ -46,6 +55,169 @@ TRIED_PLACE = False
 #                                                                                                                           #
 #                                                                                                                           #
 #############################################################################################################################
+#####################################################################################################
+#                                            rotate_cw Class                                           #
+#####################################################################################################
+class rotate_cw(pt.behaviour.Behaviour):
+
+    """
+    Returns running and commands a velocity indefinitely.
+    """
+
+    def __init__(self, angle):
+
+        rospy.loginfo("Initialising rotate behaviour.")
+
+        # action space
+        self.cmd_vel_top = rospy.get_param(rospy.get_name() + '/cmd_vel_topic')
+        self.cmd_vel_pub = rospy.Publisher(self.cmd_vel_top, Twist, queue_size=10)
+
+        # command
+        self.move_msg = Twist()
+        self.move_msg.angular.z = - 0.5
+        self.angle = angle
+
+        # become a behaviour
+        super(rotate_cw, self).__init__('Rotate robot cw')
+
+    def update(self):
+        global ROTATE_CW
+        
+        if ROTATE_CW:
+            print('ROTATE_CW : SUCCESS')
+            return pt.common.Status.SUCCESS
+
+        rate = rospy.Rate(10)
+        # send the message        
+        for _ in range(20*int(self.angle)):            
+            self.cmd_vel_pub.publish(self.move_msg)
+            rospy.loginfo("I am SPINNINGGGGG CW!!!!!!!")
+            rate.sleep()
+        ROTATE_CW = True
+        self.move_msg.angular.z = 0.0
+        self.cmd_vel_pub.publish(self.move_msg)
+        # tell the tree that you're running
+        return pt.common.Status.SUCCESS
+#####################################################################################################
+#                                            rotate_ccw Class                                           #
+#####################################################################################################
+class rotate_ccw(pt.behaviour.Behaviour):
+
+    """
+    Returns running and commands a velocity indefinitely.
+    """
+
+    def __init__(self, angle):
+
+        rospy.loginfo("Initialising rotate behaviour.")
+
+        # action space
+        self.cmd_vel_top = rospy.get_param(rospy.get_name() + '/cmd_vel_topic')
+        self.cmd_vel_pub = rospy.Publisher(self.cmd_vel_top, Twist, queue_size=10)
+
+        # command
+        self.move_msg = Twist()
+        self.move_msg.angular.z = 0.5
+        self.angle = angle
+
+        # become a behaviour
+        super(rotate_ccw, self).__init__('Rotate robot ccw')
+
+    def update(self):
+        global ROTATE_CCW
+        
+        if ROTATE_CCW:
+            print('ROTATE_CW : SUCCESS')
+            return pt.common.Status.SUCCESS
+
+        rate = rospy.Rate(10)
+        # send the message        
+        for _ in range(20*int(self.angle)):            
+            self.cmd_vel_pub.publish(self.move_msg)
+            rospy.loginfo("I am SPINNINGGGGG CCW!!!!!!!")
+            rate.sleep()
+        ROTATE_CCW = True
+        self.move_msg.angular.z = 0.0
+        self.cmd_vel_pub.publish(self.move_msg)
+        # tell the tree that you're running
+        return pt.common.Status.SUCCESS
+
+#####################################################################################################
+#                                           GO Class                                           #
+#####################################################################################################
+class counter(pt.behaviour.Behaviour):
+
+    """
+    Returns running for n ticks and success thereafter.
+    """
+
+    def __init__(self, n, name):
+
+        rospy.loginfo("Initialising counter behaviour.")
+
+        # counter
+        self.i = 0
+        self.n = n
+
+        # become a behaviour
+        super(counter, self).__init__(name)
+
+    def update(self):
+        global TUCK_ARM
+
+        if not TUCK_ARM:
+            # increment i
+            self.i += 1
+
+            # succeed after count is done
+            if self.i <= self.n:
+                print("Count FAILURE")
+                return pt.common.Status.FAILURE 
+            else:
+                self.i = 0
+                print("Count SUCCESS")
+                return pt.common.Status.SUCCESS
+        else:
+            return pt.common.Status.SUCCESS
+
+
+class go(pt.behaviour.Behaviour):
+
+    """
+    Returns running and commands a velocity indefinitely.
+    """
+
+    def __init__(self, name, linear, angular):
+
+        rospy.loginfo("Initialising go behaviour.")
+
+        # action space
+        #self.cmd_vel_top = rospy.get_param(rospy.get_name() + '/cmd_vel_topic')
+        self.cmd_vel_top = "/key_vel"
+        #rospy.loginfo(self.cmd_vel_top)
+        self.cmd_vel_pub = rospy.Publisher(self.cmd_vel_top, Twist, queue_size=10)
+
+        # command
+        self.move_msg = Twist()
+        self.move_msg.linear.x = linear
+        self.move_msg.angular.z = angular
+
+        # become a behaviour
+        super(go, self).__init__(name)
+
+    def update(self):
+
+        # send the message
+        rate = rospy.Rate(10)
+        self.cmd_vel_pub.publish(self.move_msg)
+        rospy.loginfo("I am SPINNINGGGGG!!!!!!!")
+        rate.sleep()
+        
+
+        # tell the tree that you're running
+        return pt.common.Status.RUNNING
+
+
 #####################################################################################################
 #                                           tuckarm Class                                           #
 #####################################################################################################
@@ -71,77 +243,68 @@ class tuckarm(pt.behaviour.Behaviour):
 
         # execution checker
         self.sent_goal = False
+        self.status = 0
         # self.finished = False
+
+        # add go
+        self.cmd_vel_top = "/key_vel"
+        #rospy.loginfo(self.cmd_vel_top)
+        self.cmd_vel_pub = rospy.Publisher(self.cmd_vel_top, Twist, queue_size=10)
+
+        # command
+        self.move_msg = Twist()
+        self.move_msg.linear.x = 0
+        self.move_msg.angular.z = 0
 
         # become a behaviour
         super(tuckarm, self).__init__("Tuck arm!")
 
     def update(self):
+        global TUCK_ARM, TUCK_STATUS
         # already tucked the arm
         # if self.finished: 
         #     return pt.common.Status.SUCCESS
         # command to tuck arm if haven't already
         # elif not self.sent_goal:
-
-        # send the goal
-        if not self.sent_goal:
-            self.play_motion_ac.send_goal(self.goal)
-            self.sent_goal = True
-            # rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
-            return pt.common.Status.RUNNING
-
-        elif self.play_motion_ac.get_result():
-            # rospy.sleep(10)
+        rospy.loginfo(Fore.CYAN + 'Tuck arm = in update')
+        print("TUCK_STATUS" + str(TUCK_STATUS))
+        if TUCK_ARM:
             self.sent_goal = False
-            rospy.loginfo(Fore.GREEN + 'Tuck arm = Success')
+            rospy.loginfo(Fore.CYAN + 'Tuck arm = in 1 if')
             return pt.common.Status.SUCCESS
-
-
-        # # if I was succesful! :)))))))))
-        # elif self.play_motion_ac.get_result():
-
-        #     # than I'm finished!
-        #     self.finished = True
-        #     rospy.loginfo('Tuck arm = Success')
-        #     return pt.common.Status.SUCCESS
-
-        # if failed
-        elif not self.play_motion_ac.get_result():
-            # rospy.loginfo(Fore.GREEN + 'Tuck arm = Fail')
-            return pt.common.Status.FAILURE
-
-        # if I'm still trying :|
         else:
-            # rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
-            return pt.common.Status.RUNNING
-        # # already tucked the arm
-        # if self.finished: 
-        #     return pt.common.Status.SUCCESS
-        
-        # # command to tuck arm if haven't already
-        # elif not self.sent_goal:
+            if not self.sent_goal:
+                self.play_motion_ac.send_goal(self.goal,active_cb=None, feedback_cb=self.tuckarm_fb_cb, done_cb=self.tuckarm_res_cb)
+                self.sent_goal = True
+                rospy.loginfo(Fore.RED + 'Tuck arm = send goal')
+                # self.play_motion_ac.wait_for_result()                
+                # rospy.loginfo(Fore.GREEN + 'Tuck arm = Running')
+            
+            if self.play_motion_ac.get_result():
+                TUCK_STATUS == 0
+                TUCK_ARM = True
+                self.sent_goal = False
+                rospy.loginfo(Fore.RED + 'Tuck arm = SUCCESS!!!')
+                return pt.common.Status.SUCCESS
+            elif TUCK_STATUS == 0:
+                rate = rospy.Rate(10)
+                self.cmd_vel_pub.publish(self.move_msg)
+                rospy.loginfo(Fore.CYAN + 'Tuck arm = Running')
+                return pt.common.Status.RUNNING
+            else:
+                rospy.loginfo(Fore.CYAN + 'Tuck arm = Failure')
+                return pt.common.Status.FAILURE
 
-        #     # send the goal
-        #     self.play_motion_ac.send_goal(self.goal)
-        #     self.sent_goal = True
-
-        #     # tell the tree you're running
-        #     return pt.common.Status.RUNNING
-
-        # # if I was succesful! :)))))))))
-        # elif self.play_motion_ac.get_result():
-
-        #     # than I'm finished!
-        #     self.finished = True
-        #     return pt.common.Status.SUCCESS
-
-        # # if failed
-        # elif not self.play_motion_ac.get_result():
-        #     return pt.common.Status.FAILURE
-
-        # # if I'm still trying :|
-        # else:
-        #     return pt.common.Status.RUNNING
+    def tuckarm_fb_cb(self):
+        rospy.loginfo(Fore.CYAN + 'Tuck arm = in fb')
+        TUCK_STATUS = 0
+    def tuckarm_res_cb(self, state, msg):
+        if actionlib.TerminalState.SUCCEEDED == state:
+            # self.status = 1
+            TUCK_STATUS = 1
+        else:
+            # self.status = 2
+            TUCK_STATUS = 2
 
 #####################################################################################################
 #                                    checklocalization Class                                        #
@@ -169,7 +332,8 @@ class checklocalization(pt.behaviour.Behaviour):
             return pt.common.Status.FAILURE 
     def amcl_estimate_cb(self, msg):
         global LOCALIZED
-        if np.linalg.norm(msg.pose.covariance) > 0.04:
+        # if np.linalg.norm(msg.pose.covariance) > 0.04:
+        if np.linalg.norm(msg.pose.covariance) > 0.032:
             self.reached_position = False
             LOCALIZED = False
 
@@ -209,7 +373,7 @@ class localization(pt.behaviour.Behaviour):
 
         # global DICT
         global LOCALIZED, TRIED_LOCALIZATION
-        global MOVEBASESTATUS, TRIED_MOVE
+        global TRIED_MOVE
 
         if LOCALIZED:
             #TRIED_LOCALIZATION = False
@@ -223,7 +387,8 @@ class localization(pt.behaviour.Behaviour):
         rate.sleep()        ################################
         vel = Twist()
 
-        if np.linalg.norm(self.amcl_estimation.pose.covariance) > 0.025:
+        # if np.linalg.norm(self.amcl_estimation.pose.covariance) > 0.025:
+        if np.linalg.norm(self.amcl_estimation.pose.covariance) > 0.02:
             vel.angular.z = 0.5
             self.cmd_vel_pub.publish(vel)
             #rospy.loginfo(Fore.GREEN + 'LOCALIZATION UPDATE = Running')
@@ -235,7 +400,6 @@ class localization(pt.behaviour.Behaviour):
             TRIED_LOCALIZATION = False
             rospy.loginfo(Fore.GREEN + 'LOCALIZATION UPDATE = Success')
 
-            # MOVEBASESTATUS = 0
             # TRIED_MOVE = False
             return pt.common.Status.SUCCESS
       
@@ -321,8 +485,10 @@ class cubestate(pt.behaviour.Behaviour):
     def update(self):
         global CUBESTATE
         if CUBESTATE == True:
+            print("CUBESTATE = SUCCESS")
             return pt.common.Status.SUCCESS
         else:
+            print("CUBESTATE = FAIL")
             return pt.common.Status.FAILURE
 
 #####################################################################################################
@@ -334,11 +500,12 @@ class checkgripper(pt.behaviour.Behaviour):
         super(checkgripper, self).__init__('Check Gripper')
 
     def update(self):
-        global GRIPPER_THRESHOLD, CUBESTATE, PICKED
+        global GRIPPER_THRESHOLD, CUBESTATE, PICKED,DETECTPLACEDCUBE
     
         if abs(self.gripper_state.actual.positions[0]) < GRIPPER_THRESHOLD and abs(self.gripper_state.actual.positions[1]) < GRIPPER_THRESHOLD :
             rospy.loginfo(Fore.GREEN + 'CHECK GRIPPER = Fail')
             # rospy.loginfo('gripper state = {}' .format(self.gripper_state.actual.positions))
+            DETECTPLACEDCUBE = False
             return pt.common.Status.FAILURE
           
         else:
@@ -348,6 +515,19 @@ class checkgripper(pt.behaviour.Behaviour):
 
     def check_gripper_cb(self, msg):
         self.gripper_state = msg
+
+#####################################################################################################
+#                                       setcubestate Class                                          #
+#####################################################################################################
+class setcubestate(pt.behaviour.Behaviour):
+    def __init__(self):
+        super(setcubestate, self).__init__('Set cube state')
+
+    def update(self):
+        global CUBESTATE, DETECTPLACEDCUBE
+        CUBESTATE = True
+        DETECTPLACEDCUBE = True
+        return pt.common.Status.SUCCESS
 
 #####################################################################################################
 #                                           reinitcube Class                                       #
@@ -378,15 +558,19 @@ class reinitcube(pt.behaviour.Behaviour):
     def update(self):
         
         # Over here I might need to add conditions to check for the state of the cube (using the data from topic /robotics_intro/aruco_single/position)
-        global CUBESTATE, PICKED, TRIED_MOVE, TRIED_PICK, TRIED_PLACE
+        global CUBESTATE, PICKED, TRIED_MOVE, TRIED_PICK, TRIED_PLACE, TUCK_ARM, CANCELMOVE, MOVEBASESTATUS, ROTATE_CCW, ROTATE_CW
         if TRIED_PICK:
             self.move_head_req = self.set_cube_state_srv(self.model_state)
             PICKED = False
             TRIED_MOVE =False
-            GRIPPER = True
             TRIED_PICK = False
             TRIED_PLACE = False
-            CUBESTATE = True
+            # CUBESTATE = True
+            TUCK_ARM = False
+            CANCELMOVE = True
+            MOVEBASESTATUS = 0
+            ROTATE_CCW = False
+            ROTATE_CW = False
             rospy.loginfo('does it work???????????????????????????????')
 
         rospy.loginfo(Fore.GREEN + 'REINITCUBE = Success')
@@ -504,6 +688,25 @@ class pickcube(pt.behaviour.Behaviour):
 #############################################################################################################################
 
 #####################################################################################################
+#                                checkdetectedplacecube Class                                       #
+#####################################################################################################
+class checkdetectedplacecube(pt.behaviour.Behaviour):
+    def __init__(self):
+        # rospy.loginfo('CHECK PICK CUBE INIT')
+        super(checkdetectedplacecube, self).__init__('Check...what???')
+
+    def update(self):
+        
+        global DETECTPLACEDCUBE
+        
+        if DETECTPLACEDCUBE:
+            rospy.loginfo(Fore.GREEN + 'DETECTPLACEDCUBE = Success')
+            return pt.common.Status.SUCCESS
+        else:
+            rospy.loginfo(Fore.GREEN + 'DETECTPLACEDCUBE = Fail')
+            return pt.common.Status.FAILURE
+
+#####################################################################################################
 #                                   detectplacedcube Class                                          #
 #####################################################################################################
 class detectplacedcube(pt.behaviour.Behaviour):
@@ -517,7 +720,7 @@ class detectplacedcube(pt.behaviour.Behaviour):
         super(detectplacedcube, self).__init__('Detect placed cube')
 
     def update(self):
-        global PLACED, PICKED, DETECTED, CUBEPLACED, CUBESTATE
+        global PLACED, PICKED, DETECTED, CUBEPLACED, CUBESTATE, DETECTPLACEDCUBE
         # try:
         #     rospy.wait_for_message('/robotics_intro/aruco_single/position', Vector3Stamped, timeout=5)
         #     DETECTED = True
@@ -553,6 +756,8 @@ class detectplacedcube(pt.behaviour.Behaviour):
             if self.task == 'place':
                 PLACED = False
                 CUBESTATE = False
+                DETECTPLACEDCUBE = False
+                print("detectplacedcube = FAIL")
             return pt.common.Status.FAILURE
 
         # if PLACED:
@@ -712,7 +917,7 @@ class movehead(pt.behaviour.Behaviour):
 
     def update(self):
         global HEADUP, HEADDOWN
-        print('moving the head {}' .format(self.direction))
+        # print('moving the head {}' .format(self.direction))
         if self.direction == 'up':
             if HEADUP:
                 rospy.loginfo(Fore.GREEN + 'MOVE HEAD UP = Success')
@@ -803,7 +1008,7 @@ class move(pt.behaviour.Behaviour):
 
 
     def update(self):
-        global MOVEBASESTATUS, TRIED_MOVE
+        global MOVEBASESTATUS, TRIED_MOVE, CANCELMOVE
         self.move_goal = MoveBaseGoal()
         print(Fore.YELLOW + 'MOVEBASESTATUS = {}' .format(MOVEBASESTATUS))
 
@@ -814,6 +1019,11 @@ class move(pt.behaviour.Behaviour):
         if self.goal_pose == 'place':
             target = "place"
             self.move_goal.target_pose = self.place_pose
+
+        if CANCELMOVE:
+            self.move_client.cancel_all_goals()
+            CANCELMOVE = False
+            return pt.common.Status.FAILURE
 
         # If it has already succeeded in moving then no need to send goal again
         if MOVEBASESTATUS == 1:
@@ -876,14 +1086,14 @@ class move(pt.behaviour.Behaviour):
 
     def amcl_estimate_cb(self, msg):
         global LOCALIZED
-        if np.linalg.norm(msg.pose.covariance) > 0.04:
+        # if np.linalg.norm(msg.pose.covariance) > 0.04:
+        if np.linalg.norm(msg.pose.covariance) > 0.032:
             self.reached_position = False
             # LOCALIZED = False
             # Cancel action goals & clear costmap
             self.move_client.cancel_all_goals()
             # self.clear_costmaps_srv_client()
             LOCALIZED = False
-
 
 
 
