@@ -844,7 +844,7 @@ class placecube(pt.behaviour.Behaviour):
             TRIED_PLACE = True
 
             # tell the tree you're running
-            # rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
+            rospy.loginfo(Fore.GREEN + 'PLACE CUBE = Running')
             return pt.common.Status.RUNNING
 
         # if succesful

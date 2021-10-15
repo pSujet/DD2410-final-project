@@ -114,7 +114,7 @@ class BehaviourTree(ptr.trees.BehaviourTree):
 		
 		# Place cube
 		check_place_seq = pt.composites.Sequence(name = 'check place sequence', children = [exec_checkplacecube, detect_placed_cube])
-		place_process_seq = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_checkdetectedplacecube, exec_moveplace, exec_moveheaddown, exec_placecube])
+		place_process_seq = pt.composites.Sequence(name = 'Place Sequence'			, children = [exec_checkdetectedplacecube, exec_moveplace,exec_placecube,exec_moveheaddown ])
 		place_sel = pt.composites.Selector(name = 'Place Selector'			, children = [check_place_seq, place_process_seq])
 		# Pick cube
 		cw_sel = pt.composites.Selector(name="Turn CW", children=[counter(11, "?"), go("Rotate!", 0, -0.5)])
